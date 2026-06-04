@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام CRM - إدارة العملاء</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+        }
+        .container { width: 100%; max-width: 420px; padding: 20px; }
+        .logo { text-align: center; margin-bottom: 30px; }
+        .logo h1 { font-size: 2.2em; color: #4fc3f7; margin-bottom: 5px; }
+        .logo p { color: #90a4ae; font-size: 0.95em; }
+        .card {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 35px;
+        }
+        .tabs { display: flex; margin-bottom: 25px; border-radius: 10px; overflow: hidden; background: rgba(0,0,0,0.3); }
+        .tab { flex: 1; padding: 12px; text-align: center; cursor: pointer; transition: all 0.3s; color: #90a4ae; font-weight: 600; }
+        .tab.active { background: #4fc3f7; color: #1a1a2e; }
+        .form-group { margin-bottom: 18px; }
+        .form-group label { display: block; margin-bottom: 6px; color: #b0bec5; font-size: 0.9em; }
+        .form-group input {
+            width: 100%; padding: 12px 15px; border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 10px; background: rgba(0,0,0,0.3); color: #fff;
+            font-size: 1em; transition: border 0.3s;
+        }
+        .form-group input:focus { outline: none; border-color: #4fc3f7; }
+        .btn {
+            width: 100%; padding: 14px; border: none; border-radius: 10px;
+            background: linear-gradient(135deg, #4fc3f7, #0288d1);
+            color: #fff; font-size: 1.05em; font-weight: 600;
+            cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(79,195,247,0.3); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        .message { padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.9em; display: none; }
+        .message.error { display: block; background: rgba(244,67,54,0.2); border: 1px solid #f44336; color: #ef9a9a; }
+        .message.success { display: block; background: rgba(76,175,80,0.2); border: 1px solid #4caf50; color: #a5d6a7; }
+        .features { margin-top: 30px; text-align: center; }
+        .features p { color: #78909c; font-size: 0.85em; margin-top: 10px; }
+        #registerForm { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>📊 CRM System</h1>
+            <p>نظام إدارة العملاء الذكي</p>
+        </div>
+        <div class="card">
+            <div class="tabs">
+                <div class="tab active" onclick="showLogin()">تسجيل الدخول</div>
+                <div class="tab" onclick="showRegister()">حساب جديد</div>
+            </div>
+            <div id="messageBox" class="message"></div>
+            
+            <form id="loginForm" onsubmit="login(event)">
+                <div class="form-group">
+                    <label>البريد الإلكتروني</label>
+                    <input type="email" id="loginEmail" placeholder="example@email.com" required>
+                </div>
+                <div class="form-group">
+                    <label>كلمة المرور</label>
+                    <input type="password" id="loginPassword" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="btn">دخول</button>
+            </form>
+
+            <form id="registerForm" onsubmit="register(event)">
+                <div class="form-group">
+                    <label>الاسم الكامل</label>
+                    <input type="text" id="regName" placeholder="الاسم الكامل" required>
+                </div>
+                <div class="form-group">
+                    <label>اسم المستخدم</label>
+                    <input type="text" id="regUsername" placeholder="username" required>
+                </div>
+                <div class="form-group">
+                    <label>البريد الإلكتروني</label>
+                    <input type="email" id="regEmail" placeholder="example@email.com" required>
+                </div>
+                <div class="form-group">
+                    <label>كلمة المرور</label>
+                    <input type="password" id="regPassword" placeholder="••••••••" required minlength="6">
+                </div>
+                <button type="submit" class="btn">إنشاء حساب</button>
+            </form>
+        </div>
+        <div class="features">
+            <p>إدارة العملاء • متابعة الصفقات • المهام • التقارير</p>
+        </div>
+    </div>
+
+    <script>
+        const API = '';
+        
+        // Check if already logged in
+        if (localStorage.getItem('crm_token')) {
+            window.location.href = '/dashboard';
+        }
+
+        function showLogin() {
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('registerForm').style.display = 'none';
+            document.querySelectorAll('.tab')[0].classList.add('active');
+            document.querySelectorAll('.tab')[1].classList.remove('active');
+            hideMessage();
+        }
+
+        function showRegister() {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('registerForm').style.display = 'block';
+            document.querySelectorAll('.tab')[1].classList.add('active');
+            document.querySelectorAll('.tab')[0].classList.remove('active');
+            hideMessage();
+        }
+
+        function showMessage(text, type) {
+            const box = document.getElementById('messageBox');
+            box.textContent = text;
+            box.className = 'message ' + type;
+        }
+
+        function hideMessage() {
+            document.getElementById('messageBox').className = 'message';
+        }
+
+        async function login(e) {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            try {
+                const res = await fetch(API + '/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    localStorage.setItem('crm_token', data.token);
+                    localStorage.setItem('crm_user', JSON.stringify(data.user));
+                    window.location.href = '/dashboard';
+                } else {
+                    showMessage(data.error, 'error');
+                }
+            } catch (err) {
+                showMessage('خطأ في الاتصال بالخادم', 'error');
+            }
+        }
+
+        async function register(e) {
+            e.preventDefault();
+            const fullName = document.getElementById('regName').value;
+            const username = document.getElementById('regUsername').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            
+            try {
+                const res = await fetch(API + '/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fullName, username, email, password })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    localStorage.setItem('crm_token', data.token);
+                    localStorage.setItem('crm_user', JSON.stringify(data.user));
+                    window.location.href = '/dashboard';
+                } else {
+                    showMessage(data.error, 'error');
+                }
+            } catch (err) {
+                showMessage('خطأ في الاتصال بالخادم', 'error');
+            }
+        }
+    </script>
+</body>
+</html>
