@@ -17,6 +17,9 @@ function initializeDatabase() {
         password TEXT NOT NULL,
         fullName TEXT,
         role TEXT DEFAULT 'user',
+        avatar TEXT,
+        phone TEXT,
+        company TEXT,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -33,6 +36,8 @@ function initializeDatabase() {
         notes TEXT,
         source TEXT,
         value REAL DEFAULT 0,
+        address TEXT,
+        city TEXT,
         userId INTEGER,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -91,6 +96,40 @@ function initializeDatabase() {
         FOREIGN KEY (userId) REFERENCES users(id)
       )
     `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        message TEXT,
+        type TEXT DEFAULT 'info',
+        isRead INTEGER DEFAULT 0,
+        userId INTEGER,
+        link TEXT,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (userId) REFERENCES users(id)
+      )
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customerId INTEGER NOT NULL,
+        type TEXT DEFAULT 'ملاحظة',
+        content TEXT,
+        userId INTEGER,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (customerId) REFERENCES customers(id),
+        FOREIGN KEY (userId) REFERENCES users(id)
+      )
+    `);
+
+    // Create indexes for performance
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_customers_userId ON customers(userId)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_deals_userId ON deals(userId)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_userId ON tasks(userId)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_userId ON notifications(userId)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_activities_userId ON activities(userId)`);
 
     console.log('✅ Database tables created');
     return Promise.resolve();

@@ -1,6 +1,6 @@
 /**
  * نظام CRM لإدارة العملاء - الخادم الرئيسي
- * CRM System - Main Server
+ * CRM System - Main Server v2.0
  */
 require('dotenv').config();
 const express = require('express');
@@ -16,6 +16,10 @@ const customersRoutes = require('./routes/customers');
 const dealsRoutes = require('./routes/deals');
 const tasksRoutes = require('./routes/tasks');
 const reportsRoutes = require('./routes/reports');
+const profileRoutes = require('./routes/profile');
+const notificationsRoutes = require('./routes/notifications');
+const contactsRoutes = require('./routes/contacts');
+const exportRoutes = require('./routes/export');
 const { verifyToken } = require('./middleware/auth');
 
 const app = express();
@@ -24,9 +28,16 @@ const PORT = process.env.PORT || 3000;
 // Rate Limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 300,
   message: { error: 'طلبات كثيرة جداً، حاول لاحقاً' }
 });
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'محاولات كثيرة، حاول بعد 15 دقيقة' }
+});
+
 app.use(limiter);
 
 // Security
@@ -43,19 +54,24 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'operational',
     timestamp: new Date().toISOString(),
-    version: '1.0.0',
-    uptime: process.uptime()
+    version: '2.0.0',
+    uptime: process.uptime(),
+    features: ['auth', 'customers', 'deals', 'tasks', 'reports', 'notifications', 'export', 'contacts']
   });
 });
 
 // Public routes
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
 
 // Protected routes
 app.use('/api/customers', verifyToken, customersRoutes);
 app.use('/api/deals', verifyToken, dealsRoutes);
 app.use('/api/tasks', verifyToken, tasksRoutes);
 app.use('/api/reports', verifyToken, reportsRoutes);
+app.use('/api/profile', verifyToken, profileRoutes);
+app.use('/api/notifications', verifyToken, notificationsRoutes);
+app.use('/api/contacts', verifyToken, contactsRoutes);
+app.use('/api/export', verifyToken, exportRoutes);
 
 // Serve pages
 app.get('/', (req, res) => {
@@ -64,6 +80,12 @@ app.get('/', (req, res) => {
 
 app.get('/dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('Server Error:', err);
+  res.status(500).json({ error: 'خطأ في الخادم', details: err.message });
 });
 
 // 404 handler
@@ -76,7 +98,7 @@ async function startServer() {
   try {
     await initializeDatabase();
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`✅ CRM System running on port ${PORT}`);
+      console.log(`✅ CRM System v2.0 running on port ${PORT}`);
       console.log(`🌐 http://localhost:${PORT}`);
     });
   } catch (error) {
