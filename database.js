@@ -1,157 +1,187 @@
-const Database = require('better-sqlite3');
+const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
 
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'crm.db');
-const db = new Database(dbPath);
+const DB_PATH = path.join(__dirname, 'data', 'crm.db');
 
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// Create data directory if it doesn't exist
+const dataDir = path.join(__dirname, 'data');
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
 
-function initializeDatabase() {
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS users (
+const db = new sqlite3.Database(DB_PATH, (err) => {
+  if (err) {
+    console.error('Error opening database:', err);
+  } else {
+    console.log('✅ Connected to SQLite database');
+  }
+});
+
+db.run('PRAGMA foreign_keys = ON');
+
+const init = () => {
+  return new Promise((resolve, reject) => {
+    db.serialize(() => {
+      // Users table
+      db.run(`CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
         email TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
-        fullName TEXT,
+        name TEXT NOT NULL,
         role TEXT DEFAULT 'user',
-        avatar TEXT,
-        phone TEXT,
-        company TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`, (err) => {
+        if (err) reject(err);
+      });
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS customers (
+      // Customers table
+      db.run(`CREATE TABLE IF NOT EXISTS customers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         email TEXT,
         phone TEXT,
         company TEXT,
-        category TEXT DEFAULT 'عميل جديد',
-        status TEXT DEFAULT 'نشط',
-        notes TEXT,
-        source TEXT,
-        value REAL DEFAULT 0,
-        address TEXT,
-        city TEXT,
-        userId INTEGER,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (userId) REFERENCES users(id)
-      )
-    `);
+        status TEXT DEFAULT 'active',
+        user_id INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      )`, (err) => {
+        if (err) reject(err);
+      });
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS deals (
+      // Deals table
+      db.run(`CREATE TABLE IF NOT EXISTS deals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
-        customerId INTEGER,
-        value REAL DEFAULT 0,
-        stage TEXT DEFAULT 'تواصل أولي',
-        probability INTEGER DEFAULT 10,
-        expectedCloseDate TEXT,
-        notes TEXT,
-        userId INTEGER,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (customerId) REFERENCES customers(id),
-        FOREIGN KEY (userId) REFERENCES users(id)
-      )
-    `);
+        value REAL,
+        stage TEXT DEFAULT 'prospect',
+        customer_id INTEGER,
+        user_id INTEGER,
+        due_date DATE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(customer_id) REFERENCES customers(id),
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      )`, (err) => {
+        if (err) reject(err);
+      });
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS tasks (
+      // Tasks table
+      db.run(`CREATE TABLE IF NOT EXISTS tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         description TEXT,
-        customerId INTEGER,
-        dealId INTEGER,
-        priority TEXT DEFAULT 'متوسطة',
-        status TEXT DEFAULT 'قيد الانتظار',
-        dueDate TEXT,
-        userId INTEGER,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        completedAt DATETIME,
-        FOREIGN KEY (customerId) REFERENCES customers(id),
-        FOREIGN KEY (dealId) REFERENCES deals(id),
-        FOREIGN KEY (userId) REFERENCES users(id)
-      )
-    `);
+        status TEXT DEFAULT 'pending',
+        priority TEXT DEFAULT 'medium',
+        user_id INTEGER,
+        due_date DATE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      )`, (err) => {
+        if (err) reject(err);
+      });
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS activities (
+      // Notifications table
+      db.run(`CREATE TABLE IF NOT EXISTS notifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        type TEXT NOT NULL,
-        description TEXT,
-        customerId INTEGER,
-        dealId INTEGER,
-        userId INTEGER,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (customerId) REFERENCES customers(id),
-        FOREIGN KEY (dealId) REFERENCES deals(id),
-        FOREIGN KEY (userId) REFERENCES users(id)
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS notifications (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        message TEXT,
+        user_id INTEGER NOT NULL,
+        message TEXT NOT NULL,
         type TEXT DEFAULT 'info',
-        isRead INTEGER DEFAULT 0,
-        userId INTEGER,
-        link TEXT,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (userId) REFERENCES users(id)
-      )
-    `);
+        read INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      )`, (err) => {
+        if (err) reject(err);
+      });
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS contacts (
+      // Contacts table
+      db.run(`CREATE TABLE IF NOT EXISTS contacts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customerId INTEGER NOT NULL,
-        type TEXT DEFAULT 'ملاحظة',
-        content TEXT,
-        userId INTEGER,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (customerId) REFERENCES customers(id),
-        FOREIGN KEY (userId) REFERENCES users(id)
-      )
-    `);
+        customer_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        email TEXT,
+        phone TEXT,
+        position TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(customer_id) REFERENCES customers(id)
+      )`, (err) => {
+        if (err) reject(err);
+      });
 
-    // Create indexes for performance
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_customers_userId ON customers(userId)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_deals_userId ON deals(userId)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_userId ON tasks(userId)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_userId ON notifications(userId)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_activities_userId ON activities(userId)`);
+      // Reports table
+      db.run(`CREATE TABLE IF NOT EXISTS reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        data TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      )`, (err) => {
+        if (err) reject(err);
+      });
 
-    console.log('✅ Database tables created');
-    return Promise.resolve();
-  } catch (error) {
-    console.error('❌ Database error:', error);
-    return Promise.reject(error);
-  }
-}
+      // Activity logs table
+      db.run(`CREATE TABLE IF NOT EXISTS activity_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        action TEXT NOT NULL,
+        entity_type TEXT,
+        entity_id INTEGER,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      )`, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          console.log('✅ Database tables initialized successfully');
+          resolve();
+        }
+      });
+    });
+  });
+};
 
-function run(sql, params = []) {
-  const stmt = db.prepare(sql);
-  return stmt.run(...params);
-}
+const run = (sql, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function(err) {
+      if (err) reject(err);
+      else resolve(this);
+    });
+  });
+};
 
-function get(sql, params = []) {
-  const stmt = db.prepare(sql);
-  return stmt.get(...params);
-}
+const get = (sql, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
+  });
+};
 
-function all(sql, params = []) {
-  const stmt = db.prepare(sql);
-  return stmt.all(...params);
-}
+const all = (sql, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+};
 
-module.exports = { db, initializeDatabase, run, get, all };
+const close = () => {
+  return new Promise((resolve, reject) => {
+    db.close((err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+};
+
+module.exports = {
+  db,
+  init,
+  run,
+  get,
+  all,
+  close
+};

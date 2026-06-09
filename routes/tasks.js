@@ -1,88 +1,96 @@
 const express = require('express');
-const { run, get, all } = require('../database');
 const router = express.Router();
+const db = require('../database');
+const { verifyToken } = require('../middleware/auth');
 
 // Get all tasks
-router.get('/', (req, res) => {
+router.get('/', verifyToken, async (req, res) => {
   try {
-    const { status, priority } = req.query;
-    let sql = `SELECT t.*, c.name as customerName FROM tasks t 
-               LEFT JOIN customers c ON t.customerId = c.id 
-               WHERE t.userId = ?`;
-    let params = [req.user.userId];
-
-    if (status) { sql += ' AND t.status = ?'; params.push(status); }
-    if (priority) { sql += ' AND t.priority = ?'; params.push(priority); }
-    sql += ' ORDER BY t.dueDate ASC, t.createdAt DESC';
-
-    const tasks = all(sql, params);
-    res.json({ success: true, count: tasks.length, tasks });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const tasks = await db.all('SELECT * FROM tasks WHERE user_id = ?', [req.user.id]);
+    res.json(tasks);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Get overdue tasks
-router.get('/overdue', (req, res) => {
+// Get task by ID
+router.get('/:id', verifyToken, async (req, res) => {
   try {
-    const tasks = all(
-      `SELECT t.*, c.name as customerName FROM tasks t 
-       LEFT JOIN customers c ON t.customerId = c.id 
-       WHERE t.userId = ? AND t.status != 'مكتملة' AND t.dueDate < date('now')
-       ORDER BY t.dueDate ASC`,
-      [req.user.userId]
+    const task = await db.get(
+      'SELECT * FROM tasks WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
     );
-    res.json({ success: true, count: tasks.length, tasks });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    res.json(task);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 // Create task
-router.post('/', (req, res) => {
+router.post('/', verifyToken, async (req, res) => {
   try {
-    const { title, description, customerId, dealId, priority, dueDate } = req.body;
-    if (!title) return res.status(400).json({ error: 'عنوان المهمة مطلوب' });
+    const { title, description, status, priority, due_date } = req.body;
 
-    const result = run(
-      'INSERT INTO tasks (title, description, customerId, dealId, priority, dueDate, userId) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [title, description, customerId, dealId, priority || 'متوسطة', dueDate, req.user.userId]
+    if (!title) {
+      return res.status(400).json({ error: 'Title is required' });
+    }
+
+    const result = await db.run(
+      'INSERT INTO tasks (title, description, status, priority, user_id, due_date) VALUES (?, ?, ?, ?, ?, ?)',
+      [title, description || null, status || 'pending', priority || 'medium', req.user.id, due_date || null]
     );
 
-    res.status(201).json({ success: true, message: 'تم إنشاء المهمة', id: result.lastInsertRowid });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(201).json({ id: result.lastID, title, description, status: status || 'pending', priority: priority || 'medium', user_id: req.user.id, due_date });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Update task status
-router.patch('/:id/status', (req, res) => {
+// Update task
+router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { status } = req.body;
-    const validStatuses = ['قيد الانتظار', 'جارية', 'مكتملة', 'ملغاة'];
-    if (!validStatuses.includes(status)) return res.status(400).json({ error: 'حالة غير صالحة' });
+    const { title, description, status, priority, due_date } = req.body;
+    const { id } = req.params;
 
-    const task = get('SELECT * FROM tasks WHERE id = ? AND userId = ?', [req.params.id, req.user.userId]);
-    if (!task) return res.status(404).json({ error: 'المهمة غير موجودة' });
+    const task = await db.get(
+      'SELECT * FROM tasks WHERE id = ? AND user_id = ?',
+      [id, req.user.id]
+    );
 
-    const completedAt = status === 'مكتملة' ? new Date().toISOString() : null;
-    run('UPDATE tasks SET status = ?, completedAt = ? WHERE id = ?', [status, completedAt, req.params.id]);
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
 
-    res.json({ success: true, message: 'تم تحديث حالة المهمة' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    await db.run(
+      'UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, due_date = ? WHERE id = ?',
+      [title || task.title, description || task.description, status || task.status, priority || task.priority, due_date || task.due_date, id]
+    );
+
+    res.json({ message: 'Task updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 // Delete task
-router.delete('/:id', (req, res) => {
+router.delete('/:id', verifyToken, async (req, res) => {
   try {
-    const task = get('SELECT * FROM tasks WHERE id = ? AND userId = ?', [req.params.id, req.user.userId]);
-    if (!task) return res.status(404).json({ error: 'المهمة غير موجودة' });
-    run('DELETE FROM tasks WHERE id = ?', [req.params.id]);
-    res.json({ success: true, message: 'تم حذف المهمة' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const task = await db.get(
+      'SELECT * FROM tasks WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    await db.run('DELETE FROM tasks WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Task deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

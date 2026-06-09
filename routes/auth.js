@@ -1,78 +1,68 @@
 const express = require('express');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const { run, get } = require('../database');
-const { JWT_SECRET } = require('../middleware/auth');
-
 const router = express.Router();
+const db = require('../database');
+const { generateToken, verifyToken } = require('../middleware/auth');
+const crypto = require('crypto');
 
+const hashPassword = (password) => {
+  return crypto.createHash('sha256').update(password).digest('hex');
+};
+
+// Register
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password, fullName } = req.body;
-    if (!username || !email || !password) {
-      return res.status(400).json({ error: 'جميع الحقول مطلوبة' });
+    const { email, password, name } = req.body;
+
+    if (!email || !password || !name) {
+      return res.status(400).json({ error: 'Email, password, and name are required' });
     }
 
-    const existing = get('SELECT id FROM users WHERE email = ? OR username = ?', [email, username]);
-    if (existing) {
-      return res.status(409).json({ error: 'المستخدم موجود بالفعل' });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 12);
-    const result = run(
-      'INSERT INTO users (username, email, password, fullName) VALUES (?, ?, ?, ?)',
-      [username, email, hashedPassword, fullName || username]
+    const hashedPassword = hashPassword(password);
+    const result = await db.run(
+      'INSERT INTO users (email, password, name) VALUES (?, ?, ?)',
+      [email, hashedPassword, name]
     );
 
-    const token = jwt.sign(
-      { userId: result.lastInsertRowid, email, role: 'user' },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    const user = { id: result.lastID, email, name, role: 'user' };
+    const token = generateToken(user);
 
-    res.status(201).json({
-      success: true,
-      message: 'تم التسجيل بنجاح',
-      token,
-      user: { id: result.lastInsertRowid, username, email, fullName: fullName || username }
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(201).json({ message: 'User registered successfully', token, user });
+  } catch (err) {
+    console.error('Register error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
+// Login
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+
     if (!email || !password) {
-      return res.status(400).json({ error: 'البريد وكلمة المرور مطلوبة' });
+      return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    const user = get('SELECT * FROM users WHERE email = ?', [email]);
-    if (!user) {
-      return res.status(401).json({ error: 'بيانات الدخول غير صحيحة' });
-    }
-
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) {
-      return res.status(401).json({ error: 'بيانات الدخول غير صحيحة' });
-    }
-
-    const token = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '7d' }
+    const hashedPassword = hashPassword(password);
+    const user = await db.get(
+      'SELECT * FROM users WHERE email = ? AND password = ?',
+      [email, hashedPassword]
     );
 
-    res.json({
-      success: true,
-      message: 'تم تسجيل الدخول بنجاح',
-      token,
-      user: { id: user.id, username: user.username, email: user.email, fullName: user.fullName, role: user.role }
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const token = generateToken(user);
+    res.json({ message: 'Login successful', token, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: err.message });
   }
+});
+
+// Verify token
+router.post('/verify', verifyToken, (req, res) => {
+  res.json({ valid: true, user: req.user });
 });
 
 module.exports = router;

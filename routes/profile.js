@@ -1,56 +1,65 @@
 const express = require('express');
-const bcrypt = require('bcryptjs');
-const { run, get } = require('../database');
 const router = express.Router();
+const db = require('../database');
+const { verifyToken } = require('../middleware/auth');
+const crypto = require('crypto');
 
-// Get profile
-router.get('/', (req, res) => {
+// Get user profile
+router.get('/', verifyToken, async (req, res) => {
   try {
-    const user = get('SELECT id, username, email, fullName, role, phone, company, avatar, createdAt FROM users WHERE id = ?', [req.user.userId]);
-    if (!user) return res.status(404).json({ error: 'المستخدم غير موجود' });
-    res.json({ success: true, user });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const user = await db.get(
+      'SELECT id, email, name, role, created_at FROM users WHERE id = ?',
+      [req.user.id]
+    );
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Update profile
-router.put('/', (req, res) => {
+// Update user profile
+router.put('/', verifyToken, async (req, res) => {
   try {
-    const { fullName, phone, company } = req.body;
-    const user = get('SELECT * FROM users WHERE id = ?', [req.user.userId]);
-    if (!user) return res.status(404).json({ error: 'المستخدم غير موجود' });
+    const { name, email } = req.body;
+    const user = await db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
 
-    run('UPDATE users SET fullName = ?, phone = ?, company = ? WHERE id = ?',
-      [fullName || user.fullName, phone || user.phone, company || user.company, req.user.userId]);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
-    res.json({ success: true, message: 'تم تحديث الملف الشخصي' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    await db.run(
+      'UPDATE users SET name = ?, email = ? WHERE id = ?',
+      [name || user.name, email || user.email, req.user.id]
+    );
+
+    res.json({ message: 'Profile updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 // Change password
-router.put('/password', async (req, res) => {
+router.post('/change-password', verifyToken, async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({ error: 'كلمة المرور الحالية والجديدة مطلوبة' });
-    }
-    if (newPassword.length < 6) {
-      return res.status(400).json({ error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
+    const { oldPassword, newPassword } = req.body;
+
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ error: 'Old and new password are required' });
     }
 
-    const user = get('SELECT * FROM users WHERE id = ?', [req.user.userId]);
-    const valid = await bcrypt.compare(currentPassword, user.password);
-    if (!valid) return res.status(401).json({ error: 'كلمة المرور الحالية غير صحيحة' });
+    const user = await db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    const hashedOldPassword = crypto.createHash('sha256').update(oldPassword).digest('hex');
 
-    const hashed = await bcrypt.hash(newPassword, 12);
-    run('UPDATE users SET password = ? WHERE id = ?', [hashed, req.user.userId]);
+    if (user.password !== hashedOldPassword) {
+      return res.status(401).json({ error: 'Old password is incorrect' });
+    }
 
-    res.json({ success: true, message: 'تم تغيير كلمة المرور بنجاح' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const hashedNewPassword = crypto.createHash('sha256').update(newPassword).digest('hex');
+    await db.run('UPDATE users SET password = ? WHERE id = ?', [hashedNewPassword, req.user.id]);
+
+    res.json({ message: 'Password changed successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

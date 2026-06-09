@@ -1,110 +1,96 @@
 const express = require('express');
-const { run, get, all } = require('../database');
 const router = express.Router();
-
-const STAGES = ['تواصل أولي', 'عرض سعر', 'تفاوض', 'مراجعة', 'مغلقة - ربح', 'مغلقة - خسارة'];
+const db = require('../database');
+const { verifyToken } = require('../middleware/auth');
 
 // Get all deals
-router.get('/', (req, res) => {
+router.get('/', verifyToken, async (req, res) => {
   try {
-    const { stage, customerId } = req.query;
-    let sql = `SELECT d.*, c.name as customerName FROM deals d 
-               LEFT JOIN customers c ON d.customerId = c.id 
-               WHERE d.userId = ?`;
-    let params = [req.user.userId];
-
-    if (stage) { sql += ' AND d.stage = ?'; params.push(stage); }
-    if (customerId) { sql += ' AND d.customerId = ?'; params.push(customerId); }
-    sql += ' ORDER BY d.createdAt DESC';
-
-    const deals = all(sql, params);
-    res.json({ success: true, count: deals.length, deals });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const deals = await db.all('SELECT * FROM deals WHERE user_id = ?', [req.user.id]);
+    res.json(deals);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Get pipeline summary
-router.get('/pipeline/summary', (req, res) => {
+// Get deal by ID
+router.get('/:id', verifyToken, async (req, res) => {
   try {
-    const pipeline = STAGES.map(stage => {
-      const deals = all('SELECT * FROM deals WHERE stage = ? AND userId = ?', [stage, req.user.userId]);
-      const totalValue = deals.reduce((sum, d) => sum + (d.value || 0), 0);
-      return { stage, count: deals.length, totalValue };
-    });
-    res.json({ success: true, pipeline });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const deal = await db.get(
+      'SELECT * FROM deals WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+    if (!deal) {
+      return res.status(404).json({ error: 'Deal not found' });
+    }
+    res.json(deal);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 // Create deal
-router.post('/', (req, res) => {
+router.post('/', verifyToken, async (req, res) => {
   try {
-    const { title, customerId, value, stage, probability, expectedCloseDate, notes } = req.body;
-    if (!title) return res.status(400).json({ error: 'عنوان الصفقة مطلوب' });
+    const { title, value, stage, customer_id, due_date } = req.body;
 
-    const result = run(
-      'INSERT INTO deals (title, customerId, value, stage, probability, expectedCloseDate, notes, userId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [title, customerId, value || 0, stage || 'تواصل أولي', probability || 10, expectedCloseDate, notes, req.user.userId]
+    if (!title) {
+      return res.status(400).json({ error: 'Title is required' });
+    }
+
+    const result = await db.run(
+      'INSERT INTO deals (title, value, stage, customer_id, user_id, due_date) VALUES (?, ?, ?, ?, ?, ?)',
+      [title, value || null, stage || 'prospect', customer_id || null, req.user.id, due_date || null]
     );
 
-    run('INSERT INTO activities (type, description, dealId, customerId, userId) VALUES (?, ?, ?, ?, ?)',
-      ['صفقة جديدة', `تم إنشاء صفقة: ${title}`, result.lastInsertRowid, customerId, req.user.userId]);
-
-    res.status(201).json({ success: true, message: 'تم إنشاء الصفقة', id: result.lastInsertRowid });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update deal stage
-router.patch('/:id/stage', (req, res) => {
-  try {
-    const { stage } = req.body;
-    if (!STAGES.includes(stage)) return res.status(400).json({ error: 'مرحلة غير صالحة' });
-
-    const deal = get('SELECT * FROM deals WHERE id = ? AND userId = ?', [req.params.id, req.user.userId]);
-    if (!deal) return res.status(404).json({ error: 'الصفقة غير موجودة' });
-
-    run('UPDATE deals SET stage = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?', [stage, req.params.id]);
-
-    run('INSERT INTO activities (type, description, dealId, userId) VALUES (?, ?, ?, ?)',
-      ['تحديث صفقة', `تم نقل الصفقة "${deal.title}" إلى: ${stage}`, req.params.id, req.user.userId]);
-
-    res.json({ success: true, message: 'تم تحديث المرحلة' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(201).json({ id: result.lastID, title, value, stage: stage || 'prospect', customer_id, user_id: req.user.id, due_date });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 // Update deal
-router.put('/:id', (req, res) => {
+router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { title, value, stage, probability, expectedCloseDate, notes } = req.body;
-    const deal = get('SELECT * FROM deals WHERE id = ? AND userId = ?', [req.params.id, req.user.userId]);
-    if (!deal) return res.status(404).json({ error: 'الصفقة غير موجودة' });
+    const { title, value, stage, customer_id, due_date } = req.body;
+    const { id } = req.params;
 
-    run('UPDATE deals SET title=?, value=?, stage=?, probability=?, expectedCloseDate=?, notes=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?',
-      [title || deal.title, value !== undefined ? value : deal.value, stage || deal.stage,
-       probability !== undefined ? probability : deal.probability, expectedCloseDate || deal.expectedCloseDate,
-       notes || deal.notes, req.params.id]);
+    const deal = await db.get(
+      'SELECT * FROM deals WHERE id = ? AND user_id = ?',
+      [id, req.user.id]
+    );
 
-    res.json({ success: true, message: 'تم تحديث الصفقة' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    if (!deal) {
+      return res.status(404).json({ error: 'Deal not found' });
+    }
+
+    await db.run(
+      'UPDATE deals SET title = ?, value = ?, stage = ?, customer_id = ?, due_date = ? WHERE id = ?',
+      [title || deal.title, value !== undefined ? value : deal.value, stage || deal.stage, customer_id || deal.customer_id, due_date || deal.due_date, id]
+    );
+
+    res.json({ message: 'Deal updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 // Delete deal
-router.delete('/:id', (req, res) => {
+router.delete('/:id', verifyToken, async (req, res) => {
   try {
-    const deal = get('SELECT * FROM deals WHERE id = ? AND userId = ?', [req.params.id, req.user.userId]);
-    if (!deal) return res.status(404).json({ error: 'الصفقة غير موجودة' });
-    run('DELETE FROM deals WHERE id = ?', [req.params.id]);
-    res.json({ success: true, message: 'تم حذف الصفقة' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const deal = await db.get(
+      'SELECT * FROM deals WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (!deal) {
+      return res.status(404).json({ error: 'Deal not found' });
+    }
+
+    await db.run('DELETE FROM deals WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Deal deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
